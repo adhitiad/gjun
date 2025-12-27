@@ -1,0 +1,92 @@
+# --- Byte-compiled / Optimized / DLL files ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments (PENTING) ---
+# Mencegah folder venv terupload
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.env_cache/
+
+# --- Environment Variables (SANGAT PENTING) ---
+# Jangan pernah upload API Key!
+.env
+.env.local
+.env.*
+
+# --- IDE & Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# --- Data & Models (Machine Learning) ---
+# Model file seringkali besar (>100MB), sebaiknya di-ignore
+# Kecuali Anda menggunakan Git LFS
+*.pth
+*.pt
+*.pkl
+*.h5
+*.onnx
+*.zip
+
+# Folder data spesifik proyek Anda
+data/
+logs/
+models/
+scalers/
+
+# --- Pandas / Numpy ---
+*.csv
+*.xlsx
+*.npy
+*.npz
+
+# --- Redis / Database ---
+dump.rdb
+*.sqlite3
+*.db
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- C/C++ Extensions (Jika pakai Rust/C) ---
+turbo_math/target/
+target/
+
+# --- Khusus Bot Ini ---
+# Abaikan scaler dan model hasil training lokal
+data/model_*.pth
+data/scaler_*.pkl
+data/rl_agent_*.zip

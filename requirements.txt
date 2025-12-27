@@ -1,0 +1,41 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic-settings
+python-dotenv
+redis
+pandas
+pandas_ta
+numpy
+yfinance
+scikit-learn
+groq
+feedparser
+tenacity
+torch --index-url https://download.pytorch.org/whl/cpu
+oandapyV20
+langchain
+langchain-groq
+langchain-community
+langchain-core
+pinecone
+cloudinary
+requests
+sentence-transformers
+aiohttp
+grpcio            # gRPC Core
+grpcio-tools      # Tools untuk generate code gRPC
+psycopg2-binary
+stable-baselines3
+shimmy
+gymnasium
+deap
+maturin
+langchain-huggingface
+python-json-logger
+chromadb
+scipy
+seaborn
+protobuf
+python-telegram-bot
+streamlit
