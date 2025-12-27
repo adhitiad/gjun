@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     PREDICTION_WINDOW: int = 4
     FEATURE_DIM: int = 10
 
+    # --- DATABASE ---
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL", "postgresql://user:pass@localhost:5432/db_name"
+    )
+
     # --- TRADING LOGIC (TP/SL) ---
     RISK_REWARD_RATIO: float = 2.0
     ATR_MULTIPLIER_SL: float = 1.5

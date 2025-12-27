@@ -1,20 +1,20 @@
-# brain.py (Bagian run method saja yang perlu diperhatikan, tapi ini Full File agar aman)
+# FILE: brain.py
 import asyncio
 import json
 import logging
 import os
-from collections import deque
 
-import numpy as np
 import pandas as pd
 import redis.asyncio as redis
 import torch
 import torch.nn.functional as F
 
 from config import settings
+
+# PENTING: Import fungsi fetch baru dari database yang telah kita buat sebelumnya
+from database import fetch_recent_data
 from features import processor
 from model import TimeSeriesTransformer
-from stream_manager import streamor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Brain-Engine")
@@ -23,10 +23,7 @@ logger = logging.getLogger("Brain-Engine")
 class Brain:
     def __init__(self):
         self.models = {}
-        self.buffers = {
-            s: deque(maxlen=settings.SEQ_LEN + 50) for s in settings.ACTIVE_SYMBOLS
-        }
-
+        # Kita tidak butuh buffer deque lagi karena DB sudah menyimpan history
         self.r = redis.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
@@ -36,6 +33,7 @@ class Brain:
         )
 
     async def load_models(self):
+        """Memuat model PyTorch yang sudah dilatih untuk setiap pair."""
         for sym in settings.ACTIVE_SYMBOLS:
             path = settings.get_model_path(sym)
             try:
@@ -45,11 +43,15 @@ class Brain:
                     model.eval()
                     self.models[sym] = model
                     logger.info(f"🧠 Model Loaded: {sym}")
-                # Silent warning if model not found (maybe not trained yet)
+                else:
+                    logger.warning(
+                        f"⚠️ Model not found for {sym} at {path}. (Train first!)"
+                    )
             except Exception as e:
-                logger.warning(f"Model error {sym}: {e}")
+                logger.warning(f"Model load error {sym}: {e}")
 
     def calculate_strategy(self, action_idx, current_price, atr):
+        """Menghitung SL/TP berdasarkan volatilitas (ATR)."""
         signal_type = "HOLD"
         order_type = "MARKET"
 
@@ -61,19 +63,14 @@ class Brain:
         if signal_type == "HOLD":
             return None
 
-        sl_dist = atr * settings.ATR_MULTIPLIER_SL
+        # Gunakan ATR untuk SL/TP dynamic
+        # Jika ATR 0 (karena data tick belum cukup), fallback ke 0.1% harga sebagai pengaman
+        safe_atr = atr if atr > 0 else current_price * 0.001
+
+        sl_dist = safe_atr * settings.ATR_MULTIPLIER_SL
         tp_dist = sl_dist * settings.RISK_REWARD_RATIO
 
         entry_price = current_price
-
-        # Pending Order Check
-        if atr > (current_price * 0.001):
-            if signal_type == "BUY":
-                order_type = "BUY LIMIT"
-                entry_price = current_price - (atr * settings.PENDING_ORDER_BUFFER)
-            else:
-                order_type = "SELL LIMIT"
-                entry_price = current_price + (atr * settings.PENDING_ORDER_BUFFER)
 
         if signal_type == "BUY":
             sl = entry_price - sl_dist
@@ -88,55 +85,65 @@ class Brain:
             "entry": entry_price,
             "tp": tp,
             "sl": sl,
-            "atr": atr,
+            "atr": safe_atr,
         }
 
     async def run(self):
         await self.load_models()
-        await streamor.connect()
-        logger.info("🧠 Brain Engine Started (YF Data)")
+
+        logger.info(
+            f"🧠 Brain Engine Started (Source: Database | TF: {settings.TIMEFRAME})"
+        )
 
         while True:
-            candles = await streamor.consume_market_data()
-            if not candles:
-                await asyncio.sleep(2)  # Sleep lebih lama jika data kosong
-                continue
+            # Loop untuk setiap symbol aktif di config
+            for sym in settings.ACTIVE_SYMBOLS:
 
-            for c in candles:
-                sym = c["symbol"]
-                if sym not in self.buffers:
-                    continue
+                # ---------------------------------------------------------
+                # 1. AMBIL DATA DARI DB (Replacing Streamor)
+                # ---------------------------------------------------------
+                # Ambil data secukupnya: Sequence Length + 50 candle extra untuk indikator (MA/RSI)
+                required_len = settings.SEQ_LEN + 50
 
-                # Masukkan ke buffer
-                self.buffers[sym].append(c)
-
-                # Hanya proses jika buffer sudah cukup penuh untuk sequence
-                if len(self.buffers[sym]) < settings.SEQ_LEN:
-                    continue
-
-                # Convert ke DF
-                df = pd.DataFrame(list(self.buffers[sym]))
-
-                # --- SAFETY CHECK SEBELUM PROSES ---
-                # Pastikan kolom numeric valid
-                if "close" not in df.columns:
-                    continue
-
+                # Gunakan to_thread agar query DB tidak memblokir async loop utama
                 try:
-                    df_processed, scaled = processor.process(df, sym)
+                    df = await asyncio.to_thread(fetch_recent_data, sym, required_len)
                 except Exception as e:
-                    logger.error(f"Feature Error {sym}: {e}")
+                    logger.error(f"DB Fetch Error {sym}: {e}")
                     continue
 
+                # Cek apakah data cukup untuk diproses model
+                if df.empty or len(df) < settings.SEQ_LEN:
+                    # Data belum cukup di DB, skip dulu
+                    # logger.debug(f"Waiting for more data: {sym}")
+                    continue
+
+                # ---------------------------------------------------------
+                # 2. FEATURE ENGINEERING
+                # ---------------------------------------------------------
+                try:
+                    # is_training=False agar menggunakan scaler yang tersimpan
+                    df_processed, scaled = processor.process(df, sym, is_training=False)
+                except Exception as e:
+                    logger.error(f"Feature Processing Error {sym}: {e}")
+                    continue
+
+                # Pastikan hasil scaling valid
                 if len(scaled) < settings.SEQ_LEN:
                     continue
 
-                # Inference Logic
+                # ---------------------------------------------------------
+                # 3. INFERENCE (PREDIKSI AI)
+                # ---------------------------------------------------------
                 if sym in self.models:
                     try:
+                        # Ambil sequence terakhir sesuai panjang input model
                         tensor = torch.FloatTensor(
                             scaled[-settings.SEQ_LEN :]
-                        ).unsqueeze(0)
+                        ).unsqueeze(
+                            0
+                        )  # Tambah batch dimension
+
                         with torch.no_grad():
                             logits = self.models[sym](tensor)
                             probs = F.softmax(logits, dim=1)
@@ -144,12 +151,11 @@ class Brain:
                             pred = top_class.item()
                             conf = top_p.item() * 100
 
+                        # Filter Confidence (> 70%) untuk mengurangi False Signal
                         if pred != 0 and conf > 70:
-                            last_price = c["close"]
-                            # Ambil ATR terakhir (Safe access)
-                            last_atr = df_processed.iloc[-1].get(
-                                "atr", last_price * 0.001
-                            )
+                            last_row = df_processed.iloc[-1]
+                            last_price = last_row["close"]
+                            last_atr = last_row.get("atr", 0.0)
 
                             strat = self.calculate_strategy(pred, last_price, last_atr)
 
@@ -158,21 +164,28 @@ class Brain:
                                     "symbol": sym,
                                     **strat,
                                     "confidence": conf,
-                                    "timestamp": c.get("time", ""),
+                                    "timestamp": str(last_row["time"]),
+                                    "source": "BRAIN_DB",  # Penanda bahwa ini dari DB Engine
                                 }
 
                                 logger.info(
-                                    "⚡ RAW SIGNAL: %s %s",
-                                    payload["symbol"],
-                                    payload["action"],
+                                    f"⚡ SIGNAL GENERATED: {sym} {strat['action']} (Conf: {conf:.1f}%)"
                                 )
+
+                                # Kirim ke Redis agar ditangkap Fusion Engine / Executor / Telegram
                                 await self.r.publish(
                                     settings.CHANNEL_AI_ANALYSIS, json.dumps(payload)
                                 )
+
                     except Exception as e:
                         logger.error(f"Inference Error {sym}: {e}")
 
-            await asyncio.sleep(0.5)
+            # ---------------------------------------------------------
+            # 4. SLEEP INTERVAL
+            # ---------------------------------------------------------
+            # Penting: Sleep agar tidak membebani database dengan query berlebihan.
+            # 5 detik cukup responsif untuk timeframe 15m atau 1h.
+            await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
