@@ -21,6 +21,16 @@ class Notifier:
         bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 
         print("📲 Notifier Ready...")
+        # --- TAMBAHKAN BLOK INI UNTUK CEK KONEKSI TELEGRAM ---
+        try:
+            await bot.send_message(
+                chat_id=settings.TELEGRAM_CHAT_ID,
+                text="🔔 **SYSTEM ONLINE**\nNotifier service is active and connected to Telegram.",
+            )
+            print("✅ Telegram Test Message Sent!")
+        except Exception as e:
+            print(f"❌ Telegram Connection Failed: {e}")
+        # -----------------------------------------------------
 
         async for msg in ps.listen():
             if msg["type"] == "message":

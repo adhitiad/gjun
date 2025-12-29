@@ -18,6 +18,34 @@ from model import TimeSeriesTransformer
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Trainer")
 
+# --- 1. KONFIGURASI KHUSUS CPU/APU ---
+# Cek apakah device mendukung DirectML (AMD APU di Windows) atau MPS (Mac)
+# Jika tidak, optimalkan CPU biasa.
+DEVICE = torch.device("cpu")
+USE_AMPC = False  # Mixed Precision
+
+try:
+    # Opsi Eksperimental: DirectML untuk AMD APU di Windows
+    # Butuh install: pip install torch-directml
+    import torch_directml
+
+    DEVICE = torch_directml.device()
+    logger.info("🚀 ACCELERATION: DirectML (AMD/Intel APU) DETECTED")
+except ImportError:
+    # Fallback ke CPU yang di-tuning
+    logger.info("⚙️ ACCELERATION: CPU Optimized (AVX/SSE)")
+
+    # PENTING: Jangan gunakan semua core untuk satu proses training
+    # karena kita akan menjalankan beberapa training sekaligus.
+    # Set ke 1 atau 2 threads per model agar switch context cepat.
+    torch.set_num_threads(2)
+
+# --- 2. BATASI CONCURRENCY (PENTING UNTUK APU) ---
+# APU menggunakan RAM sistem. Jangan rakus.
+# Jika RAM 16GB: set 3. Jika 8GB: set 2. Jika 32GB: set 5.
+MAX_CONCURRENT_TRAINING = 3
+SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_TRAINING)
+
 
 async def train_single_pair(symbol):
     logger.info(f"🚀 START TRAINING: {symbol} (TF: {settings.TIMEFRAME})")

@@ -39,3 +39,4 @@ seaborn
 protobuf
 python-telegram-bot
 streamlit
+torch-directml

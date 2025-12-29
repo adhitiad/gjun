@@ -45,9 +45,7 @@ class Settings(BaseSettings):
     FEATURE_DIM: int = 10
 
     # --- DATABASE ---
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "postgresql://user:pass@localhost:5432/db_name"
-    )
+    DATABASE_URL: str = "sqlite:///./data/local_market_data.db"
 
     # --- TRADING LOGIC (TP/SL) ---
     RISK_REWARD_RATIO: float = 2.0

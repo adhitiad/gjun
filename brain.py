@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from config import settings
 
 # PENTING: Import fungsi fetch baru dari database yang telah kita buat sebelumnya
-from database import fetch_recent_data
+from database import fetch_recent_data, init_db
 from features import processor
 from model import TimeSeriesTransformer
 
@@ -90,6 +90,8 @@ class Brain:
 
     async def run(self):
         await self.load_models()
+        # Initialize database (create tables) if they don't exist
+        await asyncio.to_thread(init_db)
 
         logger.info(
             f"🧠 Brain Engine Started (Source: Database | TF: {settings.TIMEFRAME})"

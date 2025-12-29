@@ -11,30 +11,23 @@ from config import settings
 
 Base = declarative_base()
 
+# Create database engine
+engine = create_engine(settings.DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 # Tabel Tick Data (TimescaleDB Hypertable)
 class MarketTick(Base):
     __tablename__ = "market_ticks"
     # Time adalah primary index untuk TimescaleDB
     time = Column(
-        DateTime(timezone=True), primary_key=True, default=datetime.datetime.utcnow
+        DateTime(timezone=True),
+        primary_key=True,
+        default=lambda: datetime.datetime.now(datetime.timezone.utc),
     )
     symbol = Column(String, primary_key=True)
     price = Column(Float)
     volume = Column(Float)
-
-
-# Setup Engine dengan Connection Pool
-# Pastikan DATABASE_URL valid di .env atau config.py
-# Contoh: postgresql://user:pass@localhost:5432/db_name
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    connect_args={"sslmode": "require"},
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(3))
@@ -44,20 +37,26 @@ def init_db():
         print("🛠️ Creating table 'market_ticks'...")
         MarketTick.__table__.create(bind=engine)
 
-        # Konversi ke Hypertable (TimescaleDB Magic) - Opsional jika pakai PostgreSQL biasa
-        with engine.connect() as conn:
-            conn.commit()
-            try:
-                conn.execute(text("SELECT create_hypertable('market_ticks', 'time');"))
-                # Level 1 Fix: Auto-delete data older than 1 year to save disk
-                conn.execute(
-                    text(
-                        "SELECT add_retention_policy('market_ticks', INTERVAL '12 months');"
+        # --- MODIFIKASI UNTUK SQLITE ---
+        # SQLite tidak support Hypertable. Cek dialek atau skip bagian ini jika menggunakan SQLite.
+        if "sqlite" not in settings.DATABASE_URL:
+            with engine.connect() as conn:
+                conn.commit()
+                try:
+                    conn.execute(
+                        text("SELECT create_hypertable('market_ticks', 'time');")
                     )
-                )
-                print("✅ TimescaleDB Hypertable & Retention Configured.")
-            except SQLAlchemyError as e:
-                print(f"⚠️ Hypertable init skipped/error: {e}")
+                    conn.execute(
+                        text(
+                            "SELECT add_retention_policy('market_ticks', INTERVAL '12 months');"
+                        )
+                    )
+                    print("✅ TimescaleDB Hypertable & Retention Configured.")
+                except SQLAlchemyError as e:
+                    print(f"⚠️ Hypertable init skipped/error: {e}")
+        else:
+            print("ℹ️ Running in SQLite mode (No Hypertable optimization).")
+
     else:
         print("⚡ Table 'market_ticks' ready.")
 

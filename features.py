@@ -7,7 +7,9 @@ import pandas as pd
 import pandas_ta as ta
 from sklearn.preprocessing import RobustScaler
 
-from config import settings
+from config import Settings
+
+settings = Settings()
 
 
 class FeatureEngineer:
