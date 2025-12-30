@@ -1,65 +1,72 @@
 import asyncio
 import json
+import logging
 
-import redis.asyncio as redis
 from telegram import Bot
 
+from brain import InternalSignalBus
 from config import settings
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("NotifierModule")
 
-class Notifier:
-    async def run(self):
-        r = redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            password=settings.REDIS_PASSWORD,
-            decode_responses=True,
+
+# --- NOTIFIER MODULE (PENGIRIM TELEGRAM) ---
+class NotifierModule:
+    def __init__(self, signal_bus: InternalSignalBus):
+        self.bus = signal_bus
+        self.bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+        self.chat_id = settings.TELEGRAM_CHAT_ID
+
+    async def send_telegram(self, data):
+        if not self.chat_id:
+            return
+
+        icon = "🟢" if "BUY" in data["action"] else "🔴"
+        msg = (
+            f"{icon} <b>AI SIGNAL</b>\n"
+            f"Symbol: <b>{data['symbol']}</b>\n"
+            f"Action: {data['action']}\n"
+            f"Entry: {data['entry']:.5f}\n"
+            f"TP: {data['tp']:.5f}\n"
+            f"SL: {data['sl']:.5f}\n"
+            f"Conf: {data['confidence']:.1f}%\n"
+            f"Time: {settings.TIMEFRAME}"
         )
-        ps = r.pubsub()
-        await ps.subscribe(settings.CHANNEL_CONFIRMATION)
-        bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
-
-        print("📲 Notifier Ready...")
-        # --- TAMBAHKAN BLOK INI UNTUK CEK KONEKSI TELEGRAM ---
         try:
-            await bot.send_message(
-                chat_id=settings.TELEGRAM_CHAT_ID,
-                text="🔔 **SYSTEM ONLINE**\nNotifier service is active and connected to Telegram.",
+            await self.bot.send_message(
+                chat_id=self.chat_id, text=msg, parse_mode="HTML"
             )
-            print("✅ Telegram Test Message Sent!")
+            logger.info(f"📲 Notification sent for {data['symbol']}")
         except Exception as e:
-            print(f"❌ Telegram Connection Failed: {e}")
-        # -----------------------------------------------------
+            logger.error(f"Telegram Error: {e}")
 
-        async for msg in ps.listen():
-            if msg["type"] == "message":
-                data = json.loads(msg["data"])
+    async def run(self):
+        # Tes Koneksi
+        try:
+            await self.bot.send_message(
+                self.chat_id,
+                "🔔 <b>System Restarted</b>\nMode: Standalone (No Redis)",
+                parse_mode="HTML",
+            )
+            logger.info("✅ Telegram Connected")
+        except Exception as e:
+            logger.error(f"❌ Telegram Failed: {e}")
 
-                icon = "🟢" if "BUY" in data["action"] else "🔴"
-                if "LIMIT" in data["order_type"]:
-                    icon = "⏳"
-
-                text = (
-                    f"{icon} <b>AI SIGNAL CONFIRMED</b>\n"
-                    f"Verified by: Groq Llama-3\n\n"
-                    f"💎 <b>{data['symbol']}</b>\n"
-                    f"Type: {data['order_type']}\n"
-                    f"Price: {data['entry']:.5f}\n"
-                    f"🎯 TP: {data['tp']:.5f}\n"
-                    f"🛡 SL: {data['sl']:.5f}\n\n"
-                    f"🧠 <b>Reason:</b> {data.get('llm_reason', '-')}"
-                )
-
-                try:
-                    await bot.send_message(
-                        chat_id=settings.TELEGRAM_CHAT_ID, text=text, parse_mode="HTML"
-                    )
-                except Exception as e:
-                    print(f"Telegram Error: {e}")
+        logger.info("📲 Notifier Module Watching...")
+        while True:
+            # Tunggu sinyal dari Internal Bus
+            signal = await self.bus.get()
+            if signal:
+                # Di sini bisa ditambahkan logika Fusion (Filter) sederhana
+                # Misal: Cek jika confidence < 75 skip, dsb.
+                await self.send_telegram(signal)
+                continue
+            await asyncio.sleep(0.1)
 
 
 if __name__ == "__main__":
-    asyncio.run(Notifier().run())
-if __name__ == "__main__":
-    asyncio.run(Notifier().run())
+    bus = InternalSignalBus()
+    loop = asyncio.get_event_loop()
+    notifier = NotifierModule(bus)
+    loop.run_until_complete(notifier.run())

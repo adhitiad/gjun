@@ -6,6 +6,7 @@ import pandas as pd
 import redis.asyncio as redis
 import yfinance as yf
 
+from brain import InternalSignalBus
 from config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -13,7 +14,8 @@ logger = logging.getLogger("MarketStreamer")
 
 
 class MarketStreamer:
-    def __init__(self):
+    def __init__(self, signal_bus: InternalSignalBus):
+        self.signal_bus = signal_bus
         self.r = redis.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
@@ -25,7 +27,7 @@ class MarketStreamer:
 
     async def connect(self):
         try:
-            await self.r.ping()
+            await self.signal_bus.connect()
             logger.info(f"✅ Streamer connected to Redis DB {settings.REDIS_DB}")
             self.running = True
         except redis.exceptions.ResponseError as e:
@@ -38,7 +40,7 @@ class MarketStreamer:
                     password=settings.REDIS_PASSWORD,
                     decode_responses=True,
                 )
-                await self.r.ping()
+                await self.signal_bus.connect()
                 logger.info("✅ Connected to Redis DB 0 (Fallback)")
                 self.running = True
         except Exception as e:
@@ -149,7 +151,10 @@ class MarketStreamer:
         return data_batch
 
     async def push_signal(self, signal_data):
-        await self.r.publish(settings.CHANNEL_AI_ANALYSIS, json.dumps(signal_data))
+        await self.signal_bus.put(
+            {"channel": settings.CHANNEL_AI_ANALYSIS, "data": signal_data}
+        )
 
 
-streamor = MarketStreamer()
+signal_bus = InternalSignalBus()
+streamor = MarketStreamer(signal_bus)
